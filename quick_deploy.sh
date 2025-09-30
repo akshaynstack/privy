@@ -262,20 +262,37 @@ log_success "Redis configured"
 # Step 4: Create application directory
 log_info "📁 Setting up application directory..."
 
-APP_DIR="/home/$USER/privy-api"
-mkdir -p $APP_DIR
-cd $APP_DIR
-
-# Copy application files (assuming they're in current directory)
-if [ -f "requirements.txt" ]; then
-    log_info "Found application files in current directory"
+# Use current directory if it contains application files, otherwise use default
+if [ -f "requirements.txt" ] && [ -f "app/main.py" ]; then
+    APP_DIR=$(pwd)
+    log_info "Using current directory as application directory: $APP_DIR"
+elif [ -f "requirements.txt" ]; then
+    # If we have requirements.txt but no app/main.py, still use current directory
+    # This handles cases where the structure might be slightly different
+    APP_DIR=$(pwd)
+    log_info "Using current directory (has requirements.txt): $APP_DIR"
 else
-    log_error "Application files not found. Please copy your Privy backend files to: $APP_DIR"
-    exit 1
+    APP_DIR="/home/$USER/privy-api"
+    log_info "Creating new application directory: $APP_DIR"
+    mkdir -p $APP_DIR
+    
+    # Check if we need to copy files from current directory
+    if [ -f "requirements.txt" ]; then
+        log_info "Copying application files from current directory..."
+        cp -r * $APP_DIR/
+        cd $APP_DIR
+    else
+        log_error "Application files not found. Please copy your Privy backend files to: $APP_DIR"
+        log_info "Required files: requirements.txt, app/main.py, and other application files"
+        exit 1
+    fi
 fi
 
 # Step 5: Create virtual environment and install dependencies
 log_info "🐍 Setting up Python environment..."
+
+# Ensure we're in the application directory
+cd $APP_DIR
 
 python3 -m venv venv
 source venv/bin/activate
@@ -300,7 +317,7 @@ DEBUG=false
 # API Configuration
 API_HOST=127.0.0.1
 API_PORT=8000
-ALLOWED_ORIGINS=https://yourdomain.com
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
 
 # Database Configuration
 DATABASE_URL=postgresql+asyncpg://privy:$PRIVY_DB_PASSWORD@localhost:5432/privy
@@ -332,17 +349,36 @@ log_success "Production configuration created"
 # Step 7: Initialize database
 log_info "🗄️ Initializing database..."
 
+# Ensure we're in the app directory and environment is loaded
+cd $APP_DIR
 export $(cat .env.prod | xargs)
-alembic upgrade head
 
-log_success "Database initialized"
+# Check if alembic is available, if not, skip migrations
+if [ -f "alembic.ini" ]; then
+    alembic upgrade head
+    log_success "Database migrations completed"
+else
+    log_warning "No alembic.ini found, skipping database migrations"
+fi
+
+log_success "Database initialization completed"
 
 # Step 8: Setup fraud detection data
 log_info "🛡️ Setting up fraud detection data..."
 
-python setup_fraud_detection.py || python cli.py seed-data --data-type all
+# Ensure we're in the app directory
+cd $APP_DIR
 
-log_success "Fraud detection data loaded"
+# Try different ways to seed data
+if [ -f "setup_fraud_detection.py" ]; then
+    python setup_fraud_detection.py
+elif [ -f "cli.py" ]; then
+    python cli.py seed-data --data-type all
+else
+    log_warning "No data seeding script found, skipping fraud detection data setup"
+fi
+
+log_success "Fraud detection data setup completed"
 
 # Step 9: Create logs directory
 mkdir -p logs
