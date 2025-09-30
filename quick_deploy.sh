@@ -147,17 +147,37 @@ log_info "🐳 Checking for existing Docker containers..."
 # Check if PostgreSQL Docker container exists
 if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" | grep -q "postgres\|postgresql"; then
     log_info "Found existing PostgreSQL Docker container, using it..."
-    POSTGRES_PASSWORD="postgres"
-    PRIVY_DB_PASSWORD="pC2bM7fpj6C4Tpsf"
-    POSTGRES_HOST="localhost"
-    POSTGRES_PORT="5432"
+    
+    # Get container name
+    POSTGRES_CONTAINER=$(run_docker ps -a --format "{{.Names}}" | grep -E "postgres|postgresql" | head -1)
+    log_info "Using PostgreSQL container: $POSTGRES_CONTAINER"
     
     # Check if container is running
     if ! run_docker ps --format "table {{.Names}}" | grep -q "postgres\|postgresql"; then
         log_info "Starting existing PostgreSQL container..."
-        run_docker start $(run_docker ps -a --format "{{.Names}}" | grep -E "postgres|postgresql" | head -1)
+        run_docker start $POSTGRES_CONTAINER
         sleep 5
     fi
+    
+    # Try to get database credentials from existing container
+    # Use the provided credentials
+    POSTGRES_PASSWORD="postgres"
+    PRIVY_DB_PASSWORD="shNKzrWFzE2N5kbG"
+    
+    # Test connection and create user if needed
+    log_info "Testing PostgreSQL connection and setting up database..."
+    
+    # Try to connect and setup database - use docker exec to run commands inside container
+    run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "SELECT 1;" > /dev/null 2>&1 || {
+        log_warning "Cannot connect to PostgreSQL with default credentials, trying alternative setup..."
+        # Try creating user through docker exec with default postgres user
+        run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "CREATE USER IF NOT EXISTS privy WITH PASSWORD 'shNKzrWFzE2N5kbG';" 2>/dev/null || true
+        run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "CREATE DATABASE IF NOT EXISTS privy OWNER privy;" 2>/dev/null || true
+        run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE privy TO privy;" 2>/dev/null || true
+    }
+    
+    POSTGRES_HOST="localhost"
+    POSTGRES_PORT="5432"
 else
     log_info "🗄️ Setting up PostgreSQL..."
     
@@ -165,14 +185,14 @@ else
     if systemctl list-units --full -all | grep -Fq "postgresql.service"; then
         log_info "Using system PostgreSQL service..."
         POSTGRES_PASSWORD="postgres"
-        PRIVY_DB_PASSWORD="pC2bM7fpj6C4Tpsf"
+        PRIVY_DB_PASSWORD="shNKzrWFzE2N5kbG"
         
         sudo systemctl start postgresql
         sudo systemctl enable postgresql
         
         # Configure PostgreSQL with proper permissions
         sudo -i -u postgres psql -c "ALTER USER postgres PASSWORD '$POSTGRES_PASSWORD';" 2>/dev/null || true
-        sudo -i -u postgres psql -c "CREATE USER privy WITH PASSWORD '$PRIVY_DB_PASSWORD';" 2>/dev/null || true
+        sudo -i -u postgres psql -c "CREATE USER privy WITH PASSWORD 'shNKzrWFzE2N5kbG';" 2>/dev/null || true
         sudo -i -u postgres psql -c "CREATE DATABASE privy OWNER privy;" 2>/dev/null || true
         sudo -i -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE privy TO privy;" 2>/dev/null || true
     else
@@ -357,8 +377,53 @@ if [ -f ".env.prod" ]; then
     export $(cat .env.prod | grep -v '^#' | grep -v '^$' | xargs)
 fi
 
+# Test database connection before running migrations
+log_info "Testing database connection..."
+python -c "
+import asyncio
+import asyncpg
+import os
+from urllib.parse import urlparse
+
+async def test_connection():
+    db_url = os.getenv('DATABASE_URL')
+    if not db_url:
+        print('No DATABASE_URL found in environment')
+        return False
+    
+    # Parse the database URL
+    parsed = urlparse(db_url.replace('postgresql+asyncpg://', 'postgresql://'))
+    
+    try:
+        conn = await asyncpg.connect(
+            user=parsed.username,
+            password=parsed.password,
+            database=parsed.path[1:],  # Remove leading slash
+            host=parsed.hostname,
+            port=parsed.port or 5432
+        )
+        await conn.close()
+        print('Database connection successful')
+        return True
+    except Exception as e:
+        print(f'Database connection failed: {e}')
+        return False
+
+if not asyncio.run(test_connection()):
+    exit(1)
+" || {
+    log_error "Database connection test failed. Please check your PostgreSQL setup."
+    log_info "Try manually creating the database user:"
+    log_info "docker exec -it <postgres-container> psql -U postgres"
+    log_info "CREATE USER privy WITH PASSWORD 'shNKzrWFzE2N5kbG';"
+    log_info "CREATE DATABASE privy OWNER privy;"
+    log_info "GRANT ALL PRIVILEGES ON DATABASE privy TO privy;"
+    exit 1
+}
+
 # Check if alembic is available, if not, skip migrations
 if [ -f "alembic.ini" ]; then
+    log_info "Running database migrations..."
     alembic upgrade head
     log_success "Database migrations completed"
 else
