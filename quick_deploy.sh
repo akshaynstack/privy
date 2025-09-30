@@ -31,14 +31,23 @@ log_error() {
 # Check if Docker is available
 check_docker() {
     if command -v docker &> /dev/null; then
-        if docker info &> /dev/null; then
-            log_info "Docker is available and running"
+        # Check if user is in docker group or if we can access docker
+        if docker info &> /dev/null 2>&1; then
+            log_info "Docker is available and accessible"
+            return 0
+        elif sudo docker info &> /dev/null 2>&1; then
+            log_warning "Docker is available but requires sudo (user not in docker group)"
+            # Try to add user to docker group if not already
+            if ! groups $USER | grep -q docker; then
+                sudo usermod -aG docker $USER
+                log_info "Added $USER to docker group. You may need to log out and back in."
+            fi
             return 0
         else
             log_warning "Docker is installed but not running"
             sudo systemctl start docker 2>/dev/null || true
             sleep 2
-            if docker info &> /dev/null; then
+            if docker info &> /dev/null 2>&1 || sudo docker info &> /dev/null 2>&1; then
                 log_info "Docker started successfully"
                 return 0
             else
@@ -69,6 +78,8 @@ echo "=================================================="
 # Step 1: Update system and install dependencies
 log_info "📦 Installing system dependencies..."
 sudo apt update
+
+# First install basic dependencies without Docker
 sudo apt install -y \
     nginx \
     supervisor \
@@ -82,11 +93,49 @@ sudo apt install -y \
     python3-venv \
     python3-pip \
     curl \
-    git \
-    docker.io \
-    docker-compose
+    git
+
+# Install Docker separately if not already installed
+if ! command -v docker &> /dev/null; then
+    log_info "Installing Docker..."
+    
+    # Remove any conflicting packages
+    sudo apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    
+    # Add Docker's official GPG key
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    
+    # Add Docker repository
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
+    # Update package index
+    sudo apt update
+    
+    # Install Docker
+    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    
+    # Add current user to docker group
+    sudo usermod -aG docker $USER
+    
+    # Start Docker
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    
+    log_info "Docker installation completed. You may need to log out and back in for group changes to take effect."
+else
+    log_info "Docker is already installed"
+fi
 
 log_success "System dependencies installed"
+
+# Helper function to run docker commands (with sudo if needed)
+run_docker() {
+    if docker info &> /dev/null 2>&1; then
+        docker "$@"
+    else
+        sudo docker "$@"
+    fi
+}
 
 # Check Docker availability
 check_docker
@@ -96,7 +145,7 @@ DOCKER_AVAILABLE=$?
 log_info "🐳 Checking for existing Docker containers..."
 
 # Check if PostgreSQL Docker container exists
-if [ $DOCKER_AVAILABLE -eq 0 ] && docker ps -a --format "table {{.Names}}" | grep -q "postgres\|postgresql"; then
+if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" | grep -q "postgres\|postgresql"; then
     log_info "Found existing PostgreSQL Docker container, using it..."
     POSTGRES_PASSWORD="postgres"
     PRIVY_DB_PASSWORD="pC2bM7fpj6C4Tpsf"
@@ -104,9 +153,9 @@ if [ $DOCKER_AVAILABLE -eq 0 ] && docker ps -a --format "table {{.Names}}" | gre
     POSTGRES_PORT="5432"
     
     # Check if container is running
-    if ! docker ps --format "table {{.Names}}" | grep -q "postgres\|postgresql"; then
+    if ! run_docker ps --format "table {{.Names}}" | grep -q "postgres\|postgresql"; then
         log_info "Starting existing PostgreSQL container..."
-        docker start $(docker ps -a --format "{{.Names}}" | grep -E "postgres|postgresql" | head -1)
+        run_docker start $(run_docker ps -a --format "{{.Names}}" | grep -E "postgres|postgresql" | head -1)
         sleep 5
     fi
 else
@@ -138,16 +187,16 @@ log_success "PostgreSQL configured"
 log_info "🔴 Checking for Redis..."
 
 # Check if Redis Docker container exists
-if [ $DOCKER_AVAILABLE -eq 0 ] && docker ps -a --format "table {{.Names}}" | grep -q "redis"; then
+if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" | grep -q "redis"; then
     log_info "Found existing Redis Docker container, using it..."
     REDIS_PASSWORD="pC2bM7fpj6C4Tpsf"
     REDIS_HOST="localhost"
     REDIS_PORT="6379"
     
     # Check if container is running
-    if ! docker ps --format "table {{.Names}}" | grep -q "redis"; then
+    if ! run_docker ps --format "table {{.Names}}" | grep -q "redis"; then
         log_info "Starting existing Redis container..."
-        docker start $(docker ps -a --format "{{.Names}}" | grep "redis" | head -1)
+        run_docker start $(run_docker ps -a --format "{{.Names}}" | grep "redis" | head -1)
         sleep 3
     fi
 else
@@ -185,7 +234,7 @@ else
             sudo systemctl start redis-server || {
                 log_warning "System Redis failed, will use Docker Redis instead"
                 if [ $DOCKER_AVAILABLE -eq 0 ]; then
-                    docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
+                    run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
                     sleep 3
                 else
                     log_error "Cannot start Redis and Docker is not available"
@@ -199,7 +248,7 @@ else
         # Use Docker Redis as fallback
         if [ $DOCKER_AVAILABLE -eq 0 ]; then
             log_info "Using Docker Redis as fallback..."
-            docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
+            run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
             sleep 3
         else
             log_error "No Redis found and Docker is not available"
