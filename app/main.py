@@ -114,8 +114,9 @@ async def health_check():
     # Check database connection
     try:
         from app.db import engine
+        from sqlalchemy import text
         async with engine.begin() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
         health_status["services"]["database"] = "healthy"
     except Exception as e:
         health_status["services"]["database"] = f"unhealthy: {str(e)}"
