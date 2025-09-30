@@ -337,8 +337,8 @@ DEBUG=false
 
 # API Configuration
 API_HOST=127.0.0.1
-API_PORT=8000
-ALLOWED_ORIGINS='["http://localhost:3000","http://localhost:8000"]'
+API_PORT=9000
+ALLOWED_ORIGINS='["http://localhost:3000","http://localhost:9000"]'
 
 # Database Configuration
 DATABASE_URL=postgresql+asyncpg://privy:$PRIVY_DB_PASSWORD@localhost:5432/privy
@@ -459,7 +459,7 @@ log_info "🦄 Creating Gunicorn configuration..."
 cat > gunicorn.conf.py << 'EOF'
 import multiprocessing
 
-bind = "127.0.0.1:8000"
+bind = "127.0.0.1:9000"
 workers = multiprocessing.cpu_count() * 2 + 1
 worker_class = "uvicorn.workers.UvicornWorker"
 timeout = 30
@@ -522,7 +522,7 @@ log_info "🌐 Setting up Nginx..."
 
 sudo tee /etc/nginx/sites-available/privy-api > /dev/null << 'EOF'
 server {
-    listen 8080;
+    listen 9080;
     server_name _;
 
     # Security headers
@@ -531,7 +531,7 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:9000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -542,7 +542,7 @@ server {
     }
 
     location /health {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:9000;
         proxy_set_header Host $host;
         access_log off;
     }
@@ -567,8 +567,7 @@ sudo ufw --force enable
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 8080/tcp
+sudo ufw allow 9080/tcp
 sudo ufw allow 443/tcp
 
 log_success "Firewall configured"
