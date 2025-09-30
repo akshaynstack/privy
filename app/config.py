@@ -1,5 +1,6 @@
 # app/config.py
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import List, Optional
 import os
 from pathlib import Path
@@ -11,27 +12,27 @@ class Settings(BaseSettings):
     # Application settings
     app_name: str = "Privy Fraud Detection API"
     version: str = "1.0.0"
-    environment: str = "development"
-    debug: bool = True
+    environment: str = Field(default="development", alias="ENVIRONMENT")
+    debug: bool = Field(default=True, alias="DEBUG")
     
     # API settings
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
-    allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    api_host: str = Field(default="0.0.0.0", alias="API_HOST")
+    api_port: int = Field(default=8000, alias="API_PORT")
+    allowed_origins: List[str] = Field(default=["http://localhost:3000", "http://localhost:8000"], alias="ALLOWED_ORIGINS")
     
     # Database settings
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/privy"
-    database_url_sync: str = "postgresql+psycopg://postgres:postgres@localhost:5432/privy"
+    database_url: str = Field(default="postgresql+asyncpg://postgres:postgres@localhost:5432/privy", alias="DATABASE_URL")
+    database_url_sync: str = Field(default="postgresql+psycopg://postgres:postgres@localhost:5432/privy", alias="DATABASE_URL_SYNC")
     
     # Redis settings
-    redis_url: str = "redis://localhost:6379"
+    redis_url: str = Field(default="redis://localhost:6379", alias="REDIS_URL")
     
     # Celery settings
-    celery_broker: str = "redis://localhost:6379/0"
-    celery_backend: str = "redis://localhost:6379/1"
+    celery_broker: str = Field(default="redis://localhost:6379/0", alias="CELERY_BROKER")
+    celery_backend: str = Field(default="redis://localhost:6379/1", alias="CELERY_BACKEND")
     
     # Security settings
-    secret_key: str = "your-secret-key-change-this-in-production"
+    secret_key: str = Field(default="your-secret-key-change-this-in-production", alias="SECRET_KEY")
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
@@ -43,7 +44,7 @@ class Settings(BaseSettings):
     disposable_email_url: str = "https://raw.githubusercontent.com/disposable/disposable-email-domains/master/domains.txt"
     
     # Logging
-    log_level: str = "INFO"
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     
     # Feature flags
     enable_analytics: bool = True
@@ -54,21 +55,6 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
-        
-        # Environment variable mapping
-        fields = {
-            'database_url': {'env': 'DATABASE_URL'},
-            'database_url_sync': {'env': 'DATABASE_URL_SYNC'},
-            'redis_url': {'env': 'REDIS_URL'},
-            'celery_broker': {'env': 'CELERY_BROKER'},
-            'celery_backend': {'env': 'CELERY_BACKEND'},
-            'secret_key': {'env': 'SECRET_KEY'},
-            'api_host': {'env': 'API_HOST'},
-            'api_port': {'env': 'API_PORT'},
-            'environment': {'env': 'ENVIRONMENT'},
-            'debug': {'env': 'DEBUG'},
-            'log_level': {'env': 'LOG_LEVEL'},
-        }
     
     @property
     def is_development(self) -> bool:
