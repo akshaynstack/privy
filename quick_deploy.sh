@@ -530,10 +530,6 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
     add_header X-Content-Type-Options "nosniff" always;
 
-    # Rate limiting
-    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
-    limit_req zone=api burst=20 nodelay;
-
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
