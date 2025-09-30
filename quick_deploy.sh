@@ -163,6 +163,7 @@ if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" |
     # Use the provided credentials
     POSTGRES_PASSWORD="postgres"
     PRIVY_DB_PASSWORD="shNKzrWFzE2N5kbG"
+    REDIS_PASSWORD="FdDyDZMAJKedKsNk"
     
     # Test connection and create user if needed
     log_info "Testing PostgreSQL connection and setting up database..."
@@ -209,7 +210,7 @@ log_info "🔴 Checking for Redis..."
 # Check if Redis Docker container exists
 if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" | grep -q "redis"; then
     log_info "Found existing Redis Docker container, using it..."
-    REDIS_PASSWORD="pC2bM7fpj6C4Tpsf"
+    REDIS_PASSWORD="FdDyDZMAJKedKsNk"
     REDIS_HOST="localhost"
     REDIS_PORT="6379"
     
@@ -223,7 +224,7 @@ else
     log_info "🔴 Setting up Redis..."
     
     # Use fixed password from memory
-    REDIS_PASSWORD="pC2bM7fpj6C4Tpsf"
+    REDIS_PASSWORD="FdDyDZMAJKedKsNk"
     
     # Check if Redis service exists and configure it
     if systemctl list-units --full -all | grep -Fq "redis-server.service"; then
@@ -254,7 +255,7 @@ else
             sudo systemctl start redis-server || {
                 log_warning "System Redis failed, will use Docker Redis instead"
                 if [ $DOCKER_AVAILABLE -eq 0 ]; then
-                    run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
+                    run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass FdDyDZMAJKedKsNk
                     sleep 3
                 else
                     log_error "Cannot start Redis and Docker is not available"
@@ -268,7 +269,7 @@ else
         # Use Docker Redis as fallback
         if [ $DOCKER_AVAILABLE -eq 0 ]; then
             log_info "Using Docker Redis as fallback..."
-            run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
+            run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass FdDyDZMAJKedKsNk
             sleep 3
         else
             log_error "No Redis found and Docker is not available"
