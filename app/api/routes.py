@@ -104,9 +104,25 @@ async def check(
                     hits.append("vpn_ip")
                 if await redis.sismember("tor_exit_nodes", payload.ip):
                     hits.append("tor_exit")
+            
         except Exception as e:
             print(f"Redis lookup error: {e}")
             # Continue without Redis checks
+    
+    # 2.5) Enhanced IP geolocation checks
+    if payload.ip:
+        try:
+            from app.services.geolocation import enhanced_ip_check
+            ip_analysis = await enhanced_ip_check(payload.ip)
+            
+            if ip_analysis.get("is_high_risk_country"):
+                hits.append("high_risk_country")
+            if ip_analysis.get("is_hosting_provider"):
+                hits.append("bad_isp")
+                
+        except Exception as e:
+            print(f"Geolocation check error: {e}")
+            # Continue without geolocation checks
     
     # 3) Check custom organization blacklists
     if api_key.org_id:
@@ -126,13 +142,21 @@ async def check(
         except Exception as e:
             print(f"Blacklist check error: {e}")
     
-    # 4) Compute risk score
-    score, level, reasons = compute_score(hits)
+    # 4) Compute risk score with enhanced analysis
+    score, level, reasons = compute_score(hits, payload.email, payload.ip)
+    
+    # Get detailed recommendations
+    from app.services.scoring import get_action_recommendations, get_risk_explanation
+    action_details = get_action_recommendations(score)
+    
     result = {
         "risk_score": score,
         "risk_level": level,
         "reasons": reasons,
-        "action": determine_action(score)
+        "action": action_details["action"],
+        "message": action_details["message"],
+        "explanation": get_risk_explanation(score, level),
+        "recommendations": action_details["recommendations"]
     }
     
     # 5) Enqueue background DB write (non-blocking)

@@ -6,13 +6,16 @@ It provides real-time risk assessment for user signups, email validation, IP rep
 ## 🚀 Features
 
 - 🛡️ **Real-time Risk Scoring** — Instant fraud detection with configurable scoring  
-- 📧 **Email Validation** — Disposable email detection and domain blacklisting  
-- 🌐 **IP Reputation** — VPN, Tor, and proxy detection with geolocation analysis  
+- 📧 **Email Validation** — Disposable email detection (10,000+ domains) and pattern analysis
+- 🌐 **IP Intelligence** — VPN, Tor, proxy detection with geolocation analysis  
+- 🌍 **Geolocation Analysis** — High-risk country detection and ISP analysis
 - 🔑 **API Key Management** — Secure authentication with per-organization API keys  
 - ⚡ **Rate Limiting** — Token bucket rate limiting with Redis backend  
 - 📊 **Analytics & Logging** — Comprehensive check logging and analytics  
 - 🚫 **Custom Blacklists** — Organization-specific IP, email, and domain blocking  
-- 🔄 **Background Processing** — Async data ingestion with Celery workers  
+- 🔄 **Background Processing** — Async data ingestion with Celery workers
+- 🤖 **Automated Data Updates** — Automatic updates of fraud detection databases
+- 📋 **Detailed Reporting** — Risk explanations and actionable recommendations  
 
 ## 🏗️ Architecture
 
