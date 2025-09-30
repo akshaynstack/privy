@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # External data sources
     disposable_email_url: str = "https://raw.githubusercontent.com/disposable/disposable-email-domains/master/domains.txt"
     
+    # MaxMind GeoLite2 License Key
+    maxmind_license_key: Optional[str] = Field(default=None, alias="MAXMIND_LICENSE_KEY")
+    maxmind_db_path: Optional[str] = Field(default=None, alias="MAXMIND_DB_PATH")
+    
     # Logging
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     
@@ -55,6 +59,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"  # Ignore extra fields instead of raising errors
     
     @property
     def is_development(self) -> bool:
