@@ -11,7 +11,7 @@ from passlib.context import CryptContext
 from app.models import User, Organization, ApiKey, Check, Blacklist
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
 def generate_api_key() -> tuple[str, str]:
@@ -115,19 +115,8 @@ class ApiKeyCRUD:
         """Create a new API key and return the key with its secret."""
         key_id, secret = generate_api_key()
         
-        # Ensure secret is within bcrypt's 72-byte limit
-        secret_to_hash = secret[:72] if len(secret.encode('utf-8')) > 72 else secret
-        
-        try:
-            hashed_secret = pwd_context.hash(secret_to_hash)
-        except ValueError as e:
-            if "password cannot be longer than 72 bytes" in str(e):
-                # Truncate to 72 bytes and try again
-                secret_bytes = secret.encode('utf-8')[:72]
-                secret_to_hash = secret_bytes.decode('utf-8', errors='ignore')
-                hashed_secret = pwd_context.hash(secret_to_hash)
-            else:
-                raise e
+        # Hash the secret using Argon2 (no length limitations)
+        hashed_secret = pwd_context.hash(secret)
         
         api_key = ApiKey(
             name=name.strip() if name else None,
@@ -175,19 +164,8 @@ class ApiKeyCRUD:
     @staticmethod
     def verify_secret(api_key: ApiKey, secret: str) -> bool:
         """Verify API key secret."""
-        # Ensure secret is within bcrypt's 72-byte limit for verification
-        secret_to_verify = secret[:72] if len(secret.encode('utf-8')) > 72 else secret
-        
-        try:
-            return pwd_context.verify(secret_to_verify, api_key.hashed_secret)
-        except ValueError as e:
-            if "password cannot be longer than 72 bytes" in str(e):
-                # Truncate to 72 bytes and try again
-                secret_bytes = secret.encode('utf-8')[:72]
-                secret_to_verify = secret_bytes.decode('utf-8', errors='ignore')
-                return pwd_context.verify(secret_to_verify, api_key.hashed_secret)
-            else:
-                raise e
+        # Argon2 doesn't have length limitations like bcrypt
+        return pwd_context.verify(secret, api_key.hashed_secret)
 
 
 class CheckCRUD:

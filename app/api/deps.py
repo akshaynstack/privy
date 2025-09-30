@@ -7,7 +7,7 @@ from app.db import get_session
 from app.models import ApiKey
 import secrets
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_ctx = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
 async def verify_api_key(
