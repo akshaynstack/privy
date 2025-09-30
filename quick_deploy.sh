@@ -28,6 +28,30 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Check if Docker is available
+check_docker() {
+    if command -v docker &> /dev/null; then
+        if docker info &> /dev/null; then
+            log_info "Docker is available and running"
+            return 0
+        else
+            log_warning "Docker is installed but not running"
+            sudo systemctl start docker 2>/dev/null || true
+            sleep 2
+            if docker info &> /dev/null; then
+                log_info "Docker started successfully"
+                return 0
+            else
+                log_warning "Docker failed to start"
+                return 1
+            fi
+        fi
+    else
+        log_warning "Docker is not installed"
+        return 1
+    fi
+}
+
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then
     log_error "Please don't run this script as root. Run as a regular user with sudo access."
@@ -58,40 +82,131 @@ sudo apt install -y \
     python3-venv \
     python3-pip \
     curl \
-    git
+    git \
+    docker.io \
+    docker-compose
 
 log_success "System dependencies installed"
 
-# Step 2: Configure PostgreSQL
-log_info "🗄️ Configuring PostgreSQL..."
+# Check Docker availability
+check_docker
+DOCKER_AVAILABLE=$?
 
-# Generate secure passwords
-POSTGRES_PASSWORD=$(openssl rand -base64 32)
-PRIVY_DB_PASSWORD=$(openssl rand -base64 32)
+# Step 2: Check for existing Docker containers and configure databases
+log_info "🐳 Checking for existing Docker containers..."
 
-# Configure PostgreSQL
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD '$POSTGRES_PASSWORD';"
-sudo -u postgres psql -c "CREATE USER privy_prod WITH PASSWORD '$PRIVY_DB_PASSWORD';"
-sudo -u postgres psql -c "CREATE DATABASE privy_prod OWNER privy_prod;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE privy_prod TO privy_prod;"
+# Check if PostgreSQL Docker container exists
+if [ $DOCKER_AVAILABLE -eq 0 ] && docker ps -a --format "table {{.Names}}" | grep -q "postgres\|postgresql"; then
+    log_info "Found existing PostgreSQL Docker container, using it..."
+    POSTGRES_PASSWORD="postgres"
+    PRIVY_DB_PASSWORD="pC2bM7fpj6C4Tpsf"
+    POSTGRES_HOST="localhost"
+    POSTGRES_PORT="5432"
+    
+    # Check if container is running
+    if ! docker ps --format "table {{.Names}}" | grep -q "postgres\|postgresql"; then
+        log_info "Starting existing PostgreSQL container..."
+        docker start $(docker ps -a --format "{{.Names}}" | grep -E "postgres|postgresql" | head -1)
+        sleep 5
+    fi
+else
+    log_info "🗄️ Setting up PostgreSQL..."
+    
+    # Check if PostgreSQL service exists
+    if systemctl list-units --full -all | grep -Fq "postgresql.service"; then
+        log_info "Using system PostgreSQL service..."
+        POSTGRES_PASSWORD="postgres"
+        PRIVY_DB_PASSWORD="pC2bM7fpj6C4Tpsf"
+        
+        sudo systemctl start postgresql
+        sudo systemctl enable postgresql
+        
+        # Configure PostgreSQL with proper permissions
+        sudo -i -u postgres psql -c "ALTER USER postgres PASSWORD '$POSTGRES_PASSWORD';" 2>/dev/null || true
+        sudo -i -u postgres psql -c "CREATE USER privy WITH PASSWORD '$PRIVY_DB_PASSWORD';" 2>/dev/null || true
+        sudo -i -u postgres psql -c "CREATE DATABASE privy OWNER privy;" 2>/dev/null || true
+        sudo -i -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE privy TO privy;" 2>/dev/null || true
+    else
+        log_error "No PostgreSQL found. Please install PostgreSQL or start Docker PostgreSQL container."
+        exit 1
+    fi
+fi
 
 log_success "PostgreSQL configured"
 
 # Step 3: Configure Redis
-log_info "🔴 Configuring Redis..."
+log_info "🔴 Checking for Redis..."
 
-REDIS_PASSWORD=$(openssl rand -base64 32)
-
-# Backup original config
-sudo cp /etc/redis/redis.conf /etc/redis/redis.conf.backup
-
-# Configure Redis
-sudo sed -i "s/# requirepass foobared/requirepass $REDIS_PASSWORD/" /etc/redis/redis.conf
-sudo sed -i "s/# maxmemory <bytes>/maxmemory 512mb/" /etc/redis/redis.conf
-sudo sed -i "s/# maxmemory-policy noeviction/maxmemory-policy allkeys-lru/" /etc/redis/redis.conf
-
-sudo systemctl restart redis-server
-sudo systemctl enable redis-server
+# Check if Redis Docker container exists
+if [ $DOCKER_AVAILABLE -eq 0 ] && docker ps -a --format "table {{.Names}}" | grep -q "redis"; then
+    log_info "Found existing Redis Docker container, using it..."
+    REDIS_PASSWORD="pC2bM7fpj6C4Tpsf"
+    REDIS_HOST="localhost"
+    REDIS_PORT="6379"
+    
+    # Check if container is running
+    if ! docker ps --format "table {{.Names}}" | grep -q "redis"; then
+        log_info "Starting existing Redis container..."
+        docker start $(docker ps -a --format "{{.Names}}" | grep "redis" | head -1)
+        sleep 3
+    fi
+else
+    log_info "🔴 Setting up Redis..."
+    
+    # Use fixed password from memory
+    REDIS_PASSWORD="pC2bM7fpj6C4Tpsf"
+    
+    # Check if Redis service exists and configure it
+    if systemctl list-units --full -all | grep -Fq "redis-server.service"; then
+        # Stop redis first to avoid conflicts
+        sudo systemctl stop redis-server 2>/dev/null || true
+        
+        # Backup original config
+        sudo cp /etc/redis/redis.conf /etc/redis/redis.conf.backup 2>/dev/null || true
+        
+        # Configure Redis with fixed password
+        sudo sed -i "s/^# requirepass foobared/requirepass $REDIS_PASSWORD/" /etc/redis/redis.conf
+        sudo sed -i "s/^requirepass .*/requirepass $REDIS_PASSWORD/" /etc/redis/redis.conf
+        sudo sed -i "s/^# maxmemory <bytes>/maxmemory 512mb/" /etc/redis/redis.conf
+        sudo sed -i "s/^# maxmemory-policy noeviction/maxmemory-policy allkeys-lru/" /etc/redis/redis.conf
+        
+        # Try to start Redis
+        sudo systemctl start redis-server || {
+            log_warning "Failed to start redis-server service, trying to fix configuration..."
+            
+            # Reset to default config and try again
+            if [ -f "/etc/redis/redis.conf.backup" ]; then
+                sudo cp /etc/redis/redis.conf.backup /etc/redis/redis.conf
+                echo "requirepass $REDIS_PASSWORD" | sudo tee -a /etc/redis/redis.conf
+                echo "maxmemory 512mb" | sudo tee -a /etc/redis/redis.conf
+                echo "maxmemory-policy allkeys-lru" | sudo tee -a /etc/redis/redis.conf
+            fi
+            
+            sudo systemctl start redis-server || {
+                log_warning "System Redis failed, will use Docker Redis instead"
+                if [ $DOCKER_AVAILABLE -eq 0 ]; then
+                    docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
+                    sleep 3
+                else
+                    log_error "Cannot start Redis and Docker is not available"
+                    exit 1
+                fi
+            }
+        }
+        
+        sudo systemctl enable redis-server 2>/dev/null || true
+    else
+        # Use Docker Redis as fallback
+        if [ $DOCKER_AVAILABLE -eq 0 ]; then
+            log_info "Using Docker Redis as fallback..."
+            docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
+            sleep 3
+        else
+            log_error "No Redis found and Docker is not available"
+            exit 1
+        fi
+    fi
+fi
 
 log_success "Redis configured"
 
@@ -139,8 +254,8 @@ API_PORT=8000
 ALLOWED_ORIGINS=https://yourdomain.com
 
 # Database Configuration
-DATABASE_URL=postgresql+asyncpg://privy_prod:$PRIVY_DB_PASSWORD@localhost:5432/privy_prod
-DATABASE_URL_SYNC=postgresql+psycopg://privy_prod:$PRIVY_DB_PASSWORD@localhost:5432/privy_prod
+DATABASE_URL=postgresql+asyncpg://privy:$PRIVY_DB_PASSWORD@localhost:5432/privy
+DATABASE_URL_SYNC=postgresql+psycopg://privy:$PRIVY_DB_PASSWORD@localhost:5432/privy
 
 # Redis Configuration
 REDIS_URL=redis://:$REDIS_PASSWORD@localhost:6379
