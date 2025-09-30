@@ -141,6 +141,25 @@ run_docker() {
 check_docker
 DOCKER_AVAILABLE=$?
 
+# Load database credentials from .env file if it exists
+if [ -f ".env" ]; then
+    # Extract passwords from .env file
+    PRIVY_DB_PASSWORD=$(grep '^DATABASE_URL=' .env | sed 's/.*:\/\/privy:\([^@]*\)@.*/\1/' | head -1)
+    REDIS_PASSWORD=$(grep '^REDIS_URL=' .env | sed 's/.*:\/\/:\([^@]*\)@.*/\1/' | head -1)
+    
+    if [ -z "$PRIVY_DB_PASSWORD" ] || [ -z "$REDIS_PASSWORD" ]; then
+        log_warning "Could not extract passwords from .env file. Using defaults."
+        PRIVY_DB_PASSWORD="shNKzrWFzE2N5kbG"
+        REDIS_PASSWORD="FdDyDZMAJKedKsNk"
+    fi
+else
+    log_warning "No .env file found. Using default credentials."
+    PRIVY_DB_PASSWORD="shNKzrWFzE2N5kbG"
+    REDIS_PASSWORD="FdDyDZMAJKedKsNk"
+fi
+
+log_info "Using credentials from environment configuration"
+
 # Step 2: Check for existing Docker containers and configure databases
 log_info "🐳 Checking for existing Docker containers..."
 
@@ -160,10 +179,8 @@ if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" |
     fi
     
     # Try to get database credentials from existing container
-    # Use the provided credentials
+    # Use the credentials from .env file
     POSTGRES_PASSWORD="postgres"
-    PRIVY_DB_PASSWORD="shNKzrWFzE2N5kbG"
-    REDIS_PASSWORD="FdDyDZMAJKedKsNk"
     
     # Test connection and create user if needed
     log_info "Testing PostgreSQL connection and setting up database..."
@@ -172,7 +189,7 @@ if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" |
     run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "SELECT 1;" > /dev/null 2>&1 || {
         log_warning "Cannot connect to PostgreSQL with default credentials, trying alternative setup..."
         # Try creating user through docker exec with default postgres user
-        run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "CREATE USER IF NOT EXISTS privy WITH PASSWORD 'shNKzrWFzE2N5kbG';" 2>/dev/null || true
+        run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "CREATE USER IF NOT EXISTS privy WITH PASSWORD '$PRIVY_DB_PASSWORD';" 2>/dev/null || true
         run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "CREATE DATABASE IF NOT EXISTS privy OWNER privy;" 2>/dev/null || true
         run_docker exec $POSTGRES_CONTAINER psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE privy TO privy;" 2>/dev/null || true
     }
@@ -186,14 +203,13 @@ else
     if systemctl list-units --full -all | grep -Fq "postgresql.service"; then
         log_info "Using system PostgreSQL service..."
         POSTGRES_PASSWORD="postgres"
-        PRIVY_DB_PASSWORD="shNKzrWFzE2N5kbG"
         
         sudo systemctl start postgresql
         sudo systemctl enable postgresql
         
         # Configure PostgreSQL with proper permissions
         sudo -i -u postgres psql -c "ALTER USER postgres PASSWORD '$POSTGRES_PASSWORD';" 2>/dev/null || true
-        sudo -i -u postgres psql -c "CREATE USER privy WITH PASSWORD 'shNKzrWFzE2N5kbG';" 2>/dev/null || true
+        sudo -i -u postgres psql -c "CREATE USER privy WITH PASSWORD '$PRIVY_DB_PASSWORD';" 2>/dev/null || true
         sudo -i -u postgres psql -c "CREATE DATABASE privy OWNER privy;" 2>/dev/null || true
         sudo -i -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE privy TO privy;" 2>/dev/null || true
     else
@@ -210,7 +226,6 @@ log_info "🔴 Checking for Redis..."
 # Check if Redis Docker container exists
 if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" | grep -q "redis"; then
     log_info "Found existing Redis Docker container, using it..."
-    REDIS_PASSWORD="FdDyDZMAJKedKsNk"
     REDIS_HOST="localhost"
     REDIS_PORT="6379"
     
@@ -223,8 +238,7 @@ if [ $DOCKER_AVAILABLE -eq 0 ] && run_docker ps -a --format "table {{.Names}}" |
 else
     log_info "🔴 Setting up Redis..."
     
-    # Use fixed password from memory
-    REDIS_PASSWORD="FdDyDZMAJKedKsNk"
+    # Use password from .env file
     
     # Check if Redis service exists and configure it
     if systemctl list-units --full -all | grep -Fq "redis-server.service"; then
@@ -255,7 +269,7 @@ else
             sudo systemctl start redis-server || {
                 log_warning "System Redis failed, will use Docker Redis instead"
                 if [ $DOCKER_AVAILABLE -eq 0 ]; then
-                    run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass FdDyDZMAJKedKsNk
+                    run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
                     sleep 3
                 else
                     log_error "Cannot start Redis and Docker is not available"
@@ -269,7 +283,7 @@ else
         # Use Docker Redis as fallback
         if [ $DOCKER_AVAILABLE -eq 0 ]; then
             log_info "Using Docker Redis as fallback..."
-            run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass FdDyDZMAJKedKsNk
+            run_docker run -d --name redis-privy -p 6379:6379 redis:7-alpine redis-server --requirepass $REDIS_PASSWORD
             sleep 3
         else
             log_error "No Redis found and Docker is not available"
@@ -416,7 +430,7 @@ if not asyncio.run(test_connection()):
     log_error "Database connection test failed. Please check your PostgreSQL setup."
     log_info "Try manually creating the database user:"
     log_info "docker exec -it <postgres-container> psql -U postgres"
-    log_info "CREATE USER privy WITH PASSWORD 'shNKzrWFzE2N5kbG';"
+    log_info "CREATE USER privy WITH PASSWORD '$PRIVY_DB_PASSWORD';"
     log_info "CREATE DATABASE privy OWNER privy;"
     log_info "GRANT ALL PRIVILEGES ON DATABASE privy TO privy;"
     exit 1
