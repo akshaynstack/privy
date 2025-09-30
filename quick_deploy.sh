@@ -351,7 +351,11 @@ log_info "🗄️ Initializing database..."
 
 # Ensure we're in the app directory and environment is loaded
 cd $APP_DIR
-export $(cat .env.prod | xargs)
+
+# Load environment variables, filtering out comments and empty lines
+if [ -f ".env.prod" ]; then
+    export $(cat .env.prod | grep -v '^#' | grep -v '^$' | xargs)
+fi
 
 # Check if alembic is available, if not, skip migrations
 if [ -f "alembic.ini" ]; then
