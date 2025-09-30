@@ -42,8 +42,8 @@ async def verify_api_key(
             detail="Invalid API key"
         )
     
-    # Verify the secret
-    if not pwd_ctx.verify(secret, api_key.hashed_secret):
+    # Verify the secret using the safer method
+    if not ApiKeyCRUD.verify_secret(api_key, secret):
         raise HTTPException(
             status_code=401,
             detail="Invalid API key"
