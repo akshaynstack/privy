@@ -337,7 +337,7 @@ DEBUG=false
 # API Configuration
 API_HOST=127.0.0.1
 API_PORT=8000
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
+ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:8000"]
 
 # Database Configuration
 DATABASE_URL=postgresql+asyncpg://privy:$PRIVY_DB_PASSWORD@localhost:5432/privy
