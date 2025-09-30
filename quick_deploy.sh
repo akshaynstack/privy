@@ -522,7 +522,7 @@ log_info "🌐 Setting up Nginx..."
 
 sudo tee /etc/nginx/sites-available/privy-api > /dev/null << 'EOF'
 server {
-    listen 80;
+    listen 8080;
     server_name _;
 
     # Security headers
@@ -568,6 +568,7 @@ sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
+sudo ufw allow 8080/tcp
 sudo ufw allow 443/tcp
 
 log_success "Firewall configured"
